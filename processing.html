@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Improved Background Blur</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .tool-container {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            margin-top: 20px;
+        }
+        canvas {
+            max-width: 100%;
+            border: 1px solid #ddd;
+        }
+        #loading {
+            display: none;
+            text-align: center;
+            margin: 10px 0;
+        }
+        .comparison {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 15px;
+        }
+        .blur-controls, .mask-controls {
+            margin: 15px 0;
+        }
+        .slider-label {
+            display: block;
+            margin-bottom: 5px;
+        }
+        .button-group {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        .button-group a {
+            flex: 1;
+            text-align: center;
+            padding: 10px;
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
+        }
+        #downloadLink {
+            background: #27ae60;
+        }
+        #documentationBtn {
+            background: #3498db;
+        }
+        #linkedinBtn {
+            background: #0077b5;
+        }
+    </style>
+</head>
+<body>
+    <h1>Background Blur (Improved)</h1>
+    <p>Smoother edges and better background accuracy</p>
+    
+    <div class="tool-container">
+        <input type="file" id="imageUpload" accept="image/*" style="width:100%;margin-bottom:10px;">
+        
+        <div class="blur-controls">
+            <label class="slider-label">Blur Strength: <span id="blurValue">15</span>px</label>
+            <input type="range" id="blurAmount" min="5" max="50" value="15" style="width:100%">
+        </div>
+        <div class="mask-controls">
+            <label class="slider-label">Edge Feather: <span id="featherValue">20</span>px</label>
+            <input type="range" id="featherAmount" min="5" max="40" value="20" style="width:100%">
+            <label class="slider-label">Segmentation Threshold: <span id="thresholdValue">0.3</span></label>
+            <input type="range" id="thresholdAmount" min="0.1" max="0.9" step="0.01" value="0.3" style="width:100%">
+        </div>
+        
+        <button id="processBtn" style="margin-top:10px;width:100%;padding:10px;">Process Image</button>
+        <div id="loading">Processing...</div>
+    </div>
+    
+    <div id="resultContainer" style="margin-top:20px;display:none;">
+        <div class="comparison">
+            <div>
+                <canvas id="originalCanvas"></canvas>
+                <p style="text-align:center;">Original</p>
+            </div>
+            <div>
+                <canvas id="resultCanvas"></canvas>
+                <p style="text-align:center;">Processed</p>
+            </div>
+        </div>
+        <div class="button-group">
+            <a id="downloadLink" href="#">Download Result</a>
+            <a id="documentationBtn" href="#" target="_blank">Documentation</a>
+            <a id="linkedinBtn" href="#" target="_blank">LinkedIn</a>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.18.0/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/body-pix@2.0.0/dist/body-pix.min.js"></script>
+    <script>
+    let net;
+    let isProcessing = false;
+
+    // UI updates
+    document.getElementById('blurAmount').addEventListener('input', function() {
+        document.getElementById('blurValue').textContent = this.value;
+    });
+    document.getElementById('featherAmount').addEventListener('input', function() {
+        document.getElementById('featherValue').textContent = this.value;
+    });
+    document.getElementById('thresholdAmount').addEventListener('input', function() {
+        document.getElementById('thresholdValue').textContent = (+this.value).toFixed(2);
+    });
+
+    async function loadModel() {
+        net = await bodyPix.load({
+            architecture: 'MobileNetV1',
+            outputStride: 16,
+            multiplier: 0.75,
+            quantBytes: 2
+        });
+    }
+    loadModel();
+
+    document.getElementById('processBtn').addEventListener('click', async function() {
+        if (isProcessing) return;
+
+        const fileInput = document.getElementById('imageUpload');
+        if (!fileInput.files.length) return alert('Please select an image');
+
+        isProcessing = true;
+        document.getElementById('processBtn').disabled = true;
+        document.getElementById('loading').style.display = 'block';
+
+        try {
+            const file = fileInput.files[0];
+            const image = await loadImage(file);
+            const blurAmount = parseInt(document.getElementById('blurAmount').value);
+            const featherAmount = parseInt(document.getElementById('featherAmount').value);
+            const thresholdAmount = parseFloat(document.getElementById('thresholdAmount').value);
+
+            const originalCanvas = document.getElementById('originalCanvas');
+            const resultCanvas = document.getElementById('resultCanvas');
+            originalCanvas.width = resultCanvas.width = image.width;
+            originalCanvas.height = resultCanvas.height = image.height;
+
+            const originalCtx = originalCanvas.getContext('2d');
+            const resultCtx = resultCanvas.getContext('2d');
+            originalCtx.drawImage(image, 0, 0);
+
+            // Segment with improved params
+            const segmentation = await net.segmentPerson(image, {
+                flipHorizontal: false,
+                internalResolution: 'full',
+                segmentationThreshold: thresholdAmount
+            });
+
+            // Blurred background
+            const blurredCanvas = await blurImage(image, blurAmount);
+
+            // Step 1: draw blurred background
+            resultCtx.drawImage(blurredCanvas, 0, 0);
+
+            // Step 2: create SOFT mask
+            const maskCanvas = document.createElement('canvas');
+            maskCanvas.width = image.width;
+            maskCanvas.height = image.height;
+            const maskCtx = maskCanvas.getContext('2d');
+            const maskImage = maskToSoftImageData(segmentation, image.width, image.height);
+            maskCtx.putImageData(maskImage, 0, 0);
+
+            // Feather edges of mask (for smooth boundary!)
+            maskCtx.filter = `blur(${featherAmount}px)`;   // slider-tuned radius
+            maskCtx.drawImage(maskCanvas, 0, 0);
+            maskCtx.filter = "none";
+
+            // Step 3: Cut person from original using feathered mask (soft alpha)
+            const personCanvas = document.createElement('canvas');
+            personCanvas.width = image.width;
+            personCanvas.height = image.height;
+            const personCtx = personCanvas.getContext('2d');
+            personCtx.clearRect(0,0,image.width,image.height);
+            personCtx.drawImage(image, 0, 0);
+            personCtx.globalCompositeOperation = 'destination-in';
+            personCtx.drawImage(maskCanvas, 0, 0);
+
+            // Step 4: Overlay person on blurred BG with natural edges
+            resultCtx.globalCompositeOperation = 'source-over';
+            resultCtx.drawImage(personCanvas, 0, 0);
+
+            // Enable download
+            resultCanvas.toBlob(blob => {
+                const link = document.getElementById('downloadLink');
+                link.href = URL.createObjectURL(blob);
+                link.download = 'blurred_bg_' + file.name;
+                document.getElementById('resultContainer').style.display = 'block';
+            }, 'image/jpeg', 0.9);
+
+        } catch (error) {
+            alert("Error processing image: " + error.message);
+        } finally {
+            isProcessing = false;
+            document.getElementById('processBtn').disabled = false;
+            document.getElementById('loading').style.display = 'none';
+        }
+    });
+
+    // Helper: load image from file
+    function loadImage(file) {
+        return new Promise((resolve) => {
+            const img = new Image();
+            img.onload = () => resolve(img);
+            img.src = URL.createObjectURL(file);
+        });
+    }
+
+    // Helper: blur image using canvas filter
+    function blurImage(image, amount) {
+        return new Promise((resolve) => {
+            const canvas = document.createElement('canvas');
+            canvas.width = image.width;
+            canvas.height = image.height;
+            const ctx = canvas.getContext('2d');
+            ctx.filter = `blur(${amount}px)`;
+            ctx.drawImage(image, 0, 0);
+            ctx.filter = 'none';
+            resolve(canvas);
+        });
+    }
+
+    // Helper: soft mask from segmentation scores (soft alpha, smooth edges)
+    function maskToSoftImageData(segmentation, width, height) {
+        // Use probability for mask alpha (smoother edge)
+        const mask = new Uint8ClampedArray(width * height * 4);
+        for (let i = 0; i < segmentation.data.length; i++) {
+            // segmentation.data[i] ranges [0,1]
+            const alpha = Math.round(segmentation.data[i] * 255);
+            mask[i*4] = 255; // white mask
+            mask[i*4+1] = 255;
+            mask[i*4+2] = 255;
+            mask[i*4+3] = alpha; // soft transparency
+        }
+        return new ImageData(mask, width, height);
+    }
+
+    // Set documentation and LinkedIn links
+    document.getElementById('documentationBtn').href = 'https://github.com/srinureddy01/Improved-Background-Blur-Tool-/new/main';
+    document.getElementById('linkedinBtn').href = 'https://www.linkedin.com/in/gudurusrinivasareddy/';
+    </script>
+</body>
+</html>
