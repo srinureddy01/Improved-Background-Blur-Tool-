@@ -108,7 +108,7 @@
     let net;
     let isProcessing = false;
 
-    // UI updates
+    // UI updates imp
     document.getElementById('blurAmount').addEventListener('input', function() {
         document.getElementById('blurValue').textContent = this.value;
     });
@@ -155,17 +155,19 @@
             const resultCtx = resultCanvas.getContext('2d');
             originalCtx.drawImage(image, 0, 0);
 
-            // Segment with improved params
+            // params
             const segmentation = await net.segmentPerson(image, {
                 flipHorizontal: false,
                 internalResolution: 'full',
                 segmentationThreshold: thresholdAmount
             });
 
-            // Blurred background
-            const blurredCanvas = await blurImage(image, blurAmount);
-
-            // Step 1: draw blurred background
+             
+            const blurredCanvas = await blurImage(image, blurAmount); // Blurred background
+            // it was like the when we upload the image it was divided in to two sigments one was pure blur image and another was scaling one the combination was the potrite image 
+            // i also refered the nsight systems ( on nvidia group ) 
+            // Step 1: draw blurred background 
+            
             resultCtx.drawImage(blurredCanvas, 0, 0);
 
             // Step 2: create SOFT mask
@@ -249,8 +251,9 @@
         }
         return new ImageData(mask, width, height);
     }
-
+// when all done then it will reflect 
     // Set documentation and LinkedIn links
+        
     document.getElementById('documentationBtn').href = 'https://github.com/srinureddy01/Improved-Background-Blur-Tool-/new/main';
     document.getElementById('linkedinBtn').href = 'https://www.linkedin.com/in/gudurusrinivasareddy/';
     </script>
